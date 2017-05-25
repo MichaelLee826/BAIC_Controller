@@ -1,26 +1,25 @@
-<?xml version="1.0" encoding="utf-8"?>
-
-
+﻿<?xml version="1.0" encoding="utf-8"?>
 <ReaderSystem>
-	<RFIDReader>
-		<ID>1</ID>
-		<IPAddress>192.168.0.1</IPAddress>
-		<location>上线</location>
-		<gate>入口</gate>
-		<status>待上线</status>
-	</RFIDReader>
-	<RFIDReader>
-		<ID>2</ID>
-		<IPAddress>192.168.0.2</IPAddress>
-		<location>上线</location>
-		<gate>出口</gate>
-		<status>待上线</status>
-	</RFIDReader>
-	<RFIDReader>
-		<ID>3</ID>
-		<IPAddress>192.168.0.3</IPAddress>
-		<location>目检1</location>
-		<gate>入口</gate>
-		<status>待上线</status>
-	</RFIDReader>
+  <count>3</count>
+  <RFIDReader>
+    <ID>1</ID>
+    <IPAddress>192.168.1.190</IPAddress>
+    <location>上线</location>
+    <gate>入口</gate>
+    <status>待上线</status>
+  </RFIDReader>
+  <RFIDReader>
+    <ID>2</ID>
+    <IPAddress>192.168.1.191</IPAddress>
+    <location>上线</location>
+    <gate>出口</gate>
+    <status>待上线</status>
+  </RFIDReader>
+  <RFIDReader>
+    <ID>3</ID>
+    <IPAddress>192.168.1.192</IPAddress>
+    <location>目检1</location>
+    <gate>入口</gate>
+    <status>待上线</status>
+  </RFIDReader>
 </ReaderSystem>

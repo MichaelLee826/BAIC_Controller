@@ -9,12 +9,21 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml;
+using ReaderB;
 
 namespace Controller
 {
     public partial class Form1 : Form
     {
-        List<RFIDReader> readerList;
+        private const String OFFLINE = "OFFLINE";                                     
+        private long fCmdRet = 0;                                           //所有执行指令的返回值
+        private int frmcomportindex1, frmcomportindex2, frmcomportindex3;
+        private int EPCLength = 36;                                         //EPC长度
+        private int EPCNumLength = 34;                                      //EPC号长度
+        private bool isRunning = false;                                     //线程是否启动的标志
+        private string[] IPAddrs;                                           //读写器IP地址
+        private List<RFIDReader> readerList;                                //读写器列表
+        private int count;                                                  //读写器个数
 
         public Form1()
         {
@@ -31,28 +40,21 @@ namespace Controller
             int height = Screen.PrimaryScreen.WorkingArea.Height;
             //MessageBox.Show(width + "*" + height);    //1440*860
 
-            //新建线程，状态栏显示当前系统时间
-            Thread timeThread = new Thread(
-                ()=>
-                {
-                    while(true)
-                    {
-                        Invoke(
-                            (MethodInvoker)(()=>
-                            {
-                                toolStripStatusLabel1.Text = "系统当前时间：" + DateTime.Now.ToString("HH:mm:ss");
-                            }));
-                        Thread.Sleep(1000);
-                    }
-                });
-            timeThread.IsBackground = true;
-            timeThread.Start();
 
-            //从XML文件中读取读写器基本信息
-            init();
+            getSystemTime();            //1.在状态栏显示系统时间
+            initReaders();              //2.从XML文件中读取读写器基本信息
+            displayReaders();           //3.将信息显示在列表中
+            getReaderSettings();        //4.获得读写器相关参数
+            openNetPort();              //5.打开网口
+            startDataReceiveThread();   //6.启动多个读数据线程
             
-            //将信息显示在列表中
-            display();
+
+
+            //启动接收数据线程
+            //int id = 0;
+            //dataReceiveThread = new Thread(new ParameterizedThreadStart(DataReceiveThread));
+            //dataReceiveThread.Name = "DataReceiveThread";
+            //dataReceiveThread.Start(id);
         }
 
         private void Form1_SizeChanged(object sender, EventArgs e)
@@ -103,8 +105,29 @@ namespace Controller
             this.Close();
         }
 
-        //从XML文件中读取读写器基本信息
-        public void init()
+        //1.在状态栏显示系统时间
+        public void getSystemTime()
+        {
+            //新建线程，状态栏显示当前系统时间
+            Thread timeThread = new Thread(
+                () =>
+                {
+                    while (true)
+                    {
+                        Invoke(
+                            (MethodInvoker)(() =>
+                            {
+                                toolStripStatusLabel1.Text = "系统当前时间：" + DateTime.Now.ToString("HH:mm:ss");
+                            }));
+                        Thread.Sleep(1000);
+                    }
+                });
+            timeThread.IsBackground = true;
+            timeThread.Start();
+        }
+
+        //2.从XML文件中读取读写器基本信息
+        public void initReaders()
         {
             XmlDocument doc = new XmlDocument();
             XmlReaderSettings settings = new XmlReaderSettings();
@@ -117,25 +140,37 @@ namespace Controller
 
             foreach(XmlNode node in nodeList)
             {
-                RFIDReader reader = new RFIDReader();
+                String nodeName = node.Name;
+                //读写器数量
+                if (nodeName.Equals("count"))
+                {
+                    count = Convert.ToInt32(((XmlElement)node).InnerText);
+                    IPAddrs = new string[count];
+                }
 
-                XmlElement element = (XmlElement)node;
-                //reader.IPAddress = element.GetAttribute("IPAddress").ToString();  获得属性
+                //各读写器信息
+                else
+                {
+                    RFIDReader reader = new RFIDReader();
 
-                XmlNodeList list = element.ChildNodes;
-                reader.ID = Convert.ToInt32(list.Item(0).InnerText);
-                reader.IPAddress = list.Item(1).InnerText;
-                reader.location = list.Item(2).InnerText;
-                reader.gate = list.Item(3).InnerText;
-                reader.status = list.Item(4).InnerText;
+                    XmlElement element = (XmlElement)node;
+                    //reader.IPAddress = element.GetAttribute("IPAddress").ToString();  获得属性
 
-                readerList.Add(reader);
+                    XmlNodeList list = element.ChildNodes;
+                    reader.ID = Convert.ToInt32(list.Item(0).InnerText);
+                    reader.IPAddress = list.Item(1).InnerText;
+                    reader.location = list.Item(2).InnerText;
+                    reader.gate = list.Item(3).InnerText;
+                    reader.status = list.Item(4).InnerText;
+
+                    readerList.Add(reader);
+                }
             }
             xmlreader.Close();
         }
 
-        //将信息显示在列表中
-        public void display()
+        //3.将信息显示在列表中
+        public void displayReaders()
         {
             listView1.Items.Clear();
             foreach(RFIDReader r in readerList)
@@ -151,10 +186,298 @@ namespace Controller
             listView1.Items[listView1.Items.Count - 1].EnsureVisible();
         }
 
+        //4.获得读写器相关参数
+        public void getReaderSettings()
+        {
+            for(int i = 0; i < count; i++)
+            {
+                IPAddrs[i] = readerList[i].IPAddress;
+            }
+        }
+
+        //5.打开网口
+        private void openNetPort()
+        {
+            int port1 = 6000;
+            int port2 = 7000;
+            int port3 = 8000;
+
+            byte fComAdr1 = 0x00;
+            byte fComAdr2 = 0x01;
+            byte fComAdr3 = 0x02;
+
+            int openresult1 = 0;
+            int openresult2 = 0;
+            int openresult3 = 0;
+
+            openresult1 = StaticClassReaderB.OpenNetPort(port1, IPAddrs[0], ref fComAdr1, ref frmcomportindex1);
+            openresult2 = StaticClassReaderB.OpenNetPort(port2, IPAddrs[1], ref fComAdr2, ref frmcomportindex2);
+            openresult3 = StaticClassReaderB.OpenNetPort(port3, IPAddrs[2], ref fComAdr3, ref frmcomportindex3);
+
+            if (openresult1 == 0)
+            {
+                MessageBox.Show("读写器一 网口打开成功", "信息");
+            }
+            if (openresult2 == 0)
+            {
+                MessageBox.Show("读写器二 网口打开成功", "信息");
+            }
+            if (openresult3 == 0)
+            {
+                MessageBox.Show("读写器三 网口打开成功", "信息");
+            }
+
+            if ((frmcomportindex1 == -1) || (openresult1 == 0x35) || (openresult1 == 0x30))
+            {
+                MessageBox.Show("读写器一 TCPIP通讯错误", "信息");
+            }
+
+            if ((frmcomportindex2 == -1) || (openresult2 == 0x35) || (openresult2 == 0x30))
+            {
+                MessageBox.Show("读写器二 TCPIP通讯错误", "信息");
+            }
+
+            if ((frmcomportindex3 == -1) || (openresult3 == 0x35) || (openresult3 == 0x30))
+            {
+                MessageBox.Show("读写器三 TCPIP通讯错误", "信息");
+            }
+        }
+
+        //6.启动多个读数据线程
+        public void startDataReceiveThread()
+        {
+            for (int i = 0; i < count; i++)
+            {
+                //读取数据线程
+                Thread dataReceiveThread = new Thread(new ParameterizedThreadStart(DataReceiveThread));
+                dataReceiveThread.Name = "DataReceiveThread--" + i;
+                dataReceiveThread.Start(i);
+            }
+        }
+
+        //6-1.读数据线程
+        public void DataReceiveThread(object obj)
+        {
+            byte readerID = Convert.ToByte(Convert.ToInt32(obj.ToString()));
+            int index = Convert.ToInt32(obj.ToString());
+            int frmindex = 0;
+            int errCount = 0;          //通讯错误次数
+            string date = "";
+            string time = "";
+            string resultString = "";
+            string showString = "";
+            bool isOffLine = false;
+
+            switch (index)
+            {
+                case 0: frmindex = frmcomportindex1;
+                        break;
+                case 1: frmindex = frmcomportindex2;
+                        break;
+                case 2: frmindex = frmcomportindex3;
+                        break;
+            }
+
+            while (true)
+            {
+                isOffLine = getReaderStatus(readerID, frmindex, ref errCount);         //6-2.检查读写器是否离线
+                if (isOffLine)
+                {
+                    outPut(readerID + "离线了");
+                    StaticClassReaderB.CloseNetPort(frmindex);
+                    Thread.CurrentThread.Abort();
+                    break;
+                }
+
+                resultString = getActiveModeData(readerID, frmindex);           //6-3.读取主动模式数据
+
+                date = DateTime.Today.ToString("yyyy-MM-dd");                   //获取当前日期
+                time = DateTime.Now.ToString("HH:mm:ss:ff");                    //获取当前时间
+
+                if (resultString.Length != 0)
+                {
+                    int num = resultString.Length / EPCLength;
+                    for (int j = 0; j < num; j++)
+                    {
+                        showString = resultString.Substring(j * EPCLength + 2, EPCNumLength);
+                        showString = EPC2VIN(showString);                       //6-4.将读取到的EPC号转换为VIN码
+
+                        outPut("显示数据：" + Thread.CurrentThread.Name.ToString() + "   读写器ID：" + readerID + "   " + date + "   " + time + "   " + showString);
+                    }
+                }
+
+                ////读写器离线
+                //if (resultString.Equals(OFFLINE))
+                //{
+                //    outPut("读写器" + readerID + "离线");
+                //    StaticClassReaderB.CloseNetPort(frmindex);
+                //    Thread.CurrentThread.Abort();
+                //}
+                ////读写器正常
+                //else
+                //{
+                //    outPut("读写器" + readerID + "正常");
+                //    date = DateTime.Today.ToString("yyyy-MM-dd");       //获取当前日期
+                //    time = DateTime.Now.ToString("HH:mm:ss:ff");        //获取当前时间
+
+                //    if (resultString.Length != 0)
+                //    {
+                //        int num = resultString.Length / EPCLength;
+                //        for (int j = 0; j < num; j++)
+                //        {
+                //            showString = resultString.Substring(j * EPCLength + 2, EPCNumLength);
+                //            showString = EPC2VIN(showString);                       //将读取到的EPC号转换为VIN码
+
+                //            outPut("显示数据：" + Thread.CurrentThread.Name.ToString() + "   读写器ID：" + readerID + "   " + date + "   " + time + "   " + showString);
+                //        }
+                //    }
+                //}
+                //Thread.Sleep(1000);
+            }
+        }
+
+        //6-2.检查读写器是否离线
+        public bool getReaderStatus(byte fComAdr, int frmcomportindex, ref int errCount)
+        {            
+            byte[] parameter = new byte[8];
+            long result = 0;
+            result = StaticClassReaderB.GetWorkModeParameter(ref fComAdr, parameter, frmcomportindex);
+            outPut(Thread.CurrentThread.Name + "的状态：" + result);
+
+            if (result != 0)
+            {
+                errCount++;
+                if (errCount > 3)
+                {
+                    outPut("读写器" + fComAdr + "离线");
+                    return true;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            errCount = 0;
+            return false;
+        }
+
+        //6-3.读取主动模式数据
+        private string getActiveModeData(byte fComAdr, int frmcomportindex)
+        {
+            byte[] data = new byte[100];
+            int dataLength = 0;
+            string temps = "";
+
+            fCmdRet = StaticClassReaderB.ReadActiveModeData(data, ref dataLength, frmcomportindex);
+            //outPut(Thread.CurrentThread.Name + "  fCmdRet：" + fCmdRet);
+
+            int count = dataLength / 24;
+            for (int i = 0; i < count; i++)
+            {
+                byte[] daw = new byte[19];
+                Array.Copy(data, 7, daw, 0, 19);                //从data第7个字节开始复制到daw，复制19字节
+                temps = ByteArrayToHexString(daw);              //6-5.字节转为十六进制
+            }
+
+            ////返回0值表示读取成功
+            //if (48 == fCmdRet)
+            //{
+            //    outPut("读取成功");
+            //    int count = dataLength / 24;
+            //    for (int i = 0; i < count; i++)
+            //    {
+            //        byte[] daw = new byte[19];
+            //        Array.Copy(data, 7, daw, 0, 19);     //从data第7个字节开始复制到daw，复制19字节
+            //        temps = ByteArrayToHexString(daw);
+            //    }
+            //}
+            ////返回非0值表示读取不成功
+            //else
+            //{
+            //    outPut("读取不成功");
+            //    temps = OFFLINE;
+            //}
+
+            return temps;
+        }
+
+        //6-4.将读取到的EPC号转换为VIN码
+        public string EPC2VIN(string EPCstr)
+        {
+            string VINstr = string.Empty;
+
+            for (int i = 0; i < EPCstr.Length;)
+            {
+                string temp = EPCstr.Substring(i, 2);                                   //EPC号为十六进制，每两个字节为一个ASCII码
+                //outPut("十六进制：" + temp);
+                int base10code = Convert.ToInt32(temp, 16);                             //将十六进制转换为十进制
+                //outPut("十进制：" + base10code);
+                i = i + 2;
+                VINstr += Encoding.ASCII.GetString(new byte[] { (byte)base10code });    //解析ASCII码
+                //outPut("结果：" + VINstr);
+            }
+            return VINstr;
+        }
+
+        //6-5.字节转为十六进制
+        private string ByteArrayToHexString(byte[] data)
+        {
+            StringBuilder sb = new StringBuilder(data.Length * 3);
+            foreach (byte b in data)
+                sb.Append(Convert.ToString(b, 16).PadLeft(2, '0'));
 
 
+            string result = sb.ToString();
+            return result.ToUpper();
+        }
 
+        
+        //向XML中添加读写器
+        public void addReader(int ID, String IPAddress, String location, String gate, String status)
+        {
+            XmlDocument doc = new XmlDocument();
+            doc.Load(@"C:\Users\Michael Lee\Documents\Visual Studio 2015\Projects\Controller\Controller\RFIDReader.xml");
 
+            XmlNode rootNode = doc.SelectSingleNode("ReaderSystem");
+            XmlElement node = doc.CreateElement("RFIDReader");
+
+            //添加属性
+            //XmlAttribute att = doc.CreateAttribute("Type");
+            //att.InnerText = "abcdefg";
+            //node.SetAttributeNode(att);
+
+            XmlElement IDElement = doc.CreateElement("ID");
+            IDElement.InnerText = ID + "";
+            node.AppendChild(IDElement);
+            XmlElement IPAddressElement = doc.CreateElement("IPAddress");
+            IPAddressElement.InnerText = IPAddress;
+            node.AppendChild(IPAddressElement);
+            XmlElement locationElement = doc.CreateElement("location");
+            locationElement.InnerText = location;
+            node.AppendChild(locationElement);
+            XmlElement gateElement = doc.CreateElement("gate");
+            gateElement.InnerText = gate;
+            node.AppendChild(gateElement);
+            XmlElement statusElement = doc.CreateElement("status");
+            statusElement.InnerText = status;
+            node.AppendChild(statusElement);
+
+            //添加一个结点
+            rootNode.AppendChild(node);
+
+            //修改读写器数量
+            count = count + 1;
+            XmlNode countNode = rootNode.SelectSingleNode("count");
+            ((XmlElement)countNode).InnerText = count + "";
+
+            doc.Save(@"C:\Users\Michael Lee\Documents\Visual Studio 2015\Projects\Controller\Controller\RFIDReader.xml");
+        }
+
+        //向控制台输出
+        public void outPut(string message)
+        {
+            Console.WriteLine(DateTime.Now.ToString("HH:mm:ss:ff ") + message);
+        }
     }
     
 }
