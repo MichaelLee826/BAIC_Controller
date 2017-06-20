@@ -10,20 +10,21 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml;
 using ReaderB;
+using Oracle.DataAccess.Client;
 
 namespace Controller
 {
     public partial class Form1 : Form
     {
-        private const String OFFLINE = "OFFLINE";                                     
         private long fCmdRet = 0;                                           //所有执行指令的返回值
         private int frmcomportindex1, frmcomportindex2, frmcomportindex3;
         private int EPCLength = 36;                                         //EPC长度
         private int EPCNumLength = 34;                                      //EPC号长度
-        private bool isRunning = false;                                     //线程是否启动的标志
         private string[] IPAddrs;                                           //读写器IP地址
         private List<RFIDReader> readerList;                                //读写器列表
         private int count;                                                  //读写器个数
+        private int cacheNum = 5;                                           //每个读写器缓存的车辆数目
+        private double durationMin = 5;                                     //判断重复读的时间间隔（以分钟为单位）
 
         public Form1()
         {
@@ -36,8 +37,12 @@ namespace Controller
 
         private void Form1_Load(object sender, EventArgs e)
         {
-            int width = Screen.PrimaryScreen.WorkingArea.Width;
-            int height = Screen.PrimaryScreen.WorkingArea.Height;
+            this.Top = 0;
+            this.Left = 0;
+            this.Width = Screen.PrimaryScreen.WorkingArea.Width;
+            this.Height = Screen.PrimaryScreen.WorkingArea.Height;
+            //this.Size = Screen.PrimaryScreen.WorkingArea.Size;
+            this.MaximumSize = new Size(Screen.PrimaryScreen.WorkingArea.Width, Screen.PrimaryScreen.WorkingArea.Height);
             //MessageBox.Show(width + "*" + height);    //1440*860
 
 
@@ -47,7 +52,7 @@ namespace Controller
             getReaderSettings();        //4.获得读写器相关参数
             openNetPort();              //5.打开网口
             startDataReceiveThread();   //6.启动多个读数据线程
-            
+
 
 
             //启动接收数据线程
@@ -216,30 +221,36 @@ namespace Controller
 
             if (openresult1 == 0)
             {
-                MessageBox.Show("读写器一 网口打开成功", "信息");
+                //MessageBox.Show("读写器一 网口打开成功", "信息");
+                updateUI(0, "在线");                              //6-9.通过代理更新ListView内容
             }
             if (openresult2 == 0)
             {
-                MessageBox.Show("读写器二 网口打开成功", "信息");
+                //MessageBox.Show("读写器二 网口打开成功", "信息");
+                updateUI(1, "在线");
             }
             if (openresult3 == 0)
             {
-                MessageBox.Show("读写器三 网口打开成功", "信息");
+               // MessageBox.Show("读写器三 网口打开成功", "信息");
+                updateUI(2, "在线");
             }
 
             if ((frmcomportindex1 == -1) || (openresult1 == 0x35) || (openresult1 == 0x30))
             {
-                MessageBox.Show("读写器一 TCPIP通讯错误", "信息");
+                //MessageBox.Show("读写器一 TCPIP通讯错误", "信息");
+                updateUI(0, "通讯错误");
             }
 
             if ((frmcomportindex2 == -1) || (openresult2 == 0x35) || (openresult2 == 0x30))
             {
-                MessageBox.Show("读写器二 TCPIP通讯错误", "信息");
+                //MessageBox.Show("读写器二 TCPIP通讯错误", "信息");
+                updateUI(1, "通讯错误");
             }
 
             if ((frmcomportindex3 == -1) || (openresult3 == 0x35) || (openresult3 == 0x30))
             {
-                MessageBox.Show("读写器三 TCPIP通讯错误", "信息");
+                //MessageBox.Show("读写器三 TCPIP通讯错误", "信息");
+                updateUI(2, "通讯错误");
             }
         }
 
@@ -280,10 +291,11 @@ namespace Controller
 
             while (true)
             {
-                isOffLine = getReaderStatus(readerID, frmindex, ref errCount);         //6-2.检查读写器是否离线
+                isOffLine = getReaderStatus(readerID, frmindex, ref errCount);  //6-2.检查读写器是否离线
                 if (isOffLine)
                 {
                     outPut(readerID + "离线了");
+                    updateUI(index, "离线");                                    //6-9.通过代理更新ListView内容
                     StaticClassReaderB.CloseNetPort(frmindex);
                     Thread.CurrentThread.Abort();
                     break;
@@ -292,7 +304,7 @@ namespace Controller
                 resultString = getActiveModeData(readerID, frmindex);           //6-3.读取主动模式数据
 
                 date = DateTime.Today.ToString("yyyy-MM-dd");                   //获取当前日期
-                time = DateTime.Now.ToString("HH:mm:ss:ff");                    //获取当前时间
+                time = DateTime.Now.ToString("HH:mm:ss");                       //获取当前时间
 
                 if (resultString.Length != 0)
                 {
@@ -302,37 +314,17 @@ namespace Controller
                         showString = resultString.Substring(j * EPCLength + 2, EPCNumLength);
                         showString = EPC2VIN(showString);                       //6-4.将读取到的EPC号转换为VIN码
 
+                        Vehicle vehicle = new Vehicle(showString, date, time, "Station" + index, "DriverID", "Gate");
+
+                        if (isInQueue(vehicle))                                 //6-6.判断是否在缓存队列中，如果在，则不写入数据库
+                        {
+                            break;
+                        }
+
+                        manageDatabase(vehicle);                                //6-7.写入数据库
                         outPut("显示数据：" + Thread.CurrentThread.Name.ToString() + "   读写器ID：" + readerID + "   " + date + "   " + time + "   " + showString);
                     }
                 }
-
-                ////读写器离线
-                //if (resultString.Equals(OFFLINE))
-                //{
-                //    outPut("读写器" + readerID + "离线");
-                //    StaticClassReaderB.CloseNetPort(frmindex);
-                //    Thread.CurrentThread.Abort();
-                //}
-                ////读写器正常
-                //else
-                //{
-                //    outPut("读写器" + readerID + "正常");
-                //    date = DateTime.Today.ToString("yyyy-MM-dd");       //获取当前日期
-                //    time = DateTime.Now.ToString("HH:mm:ss:ff");        //获取当前时间
-
-                //    if (resultString.Length != 0)
-                //    {
-                //        int num = resultString.Length / EPCLength;
-                //        for (int j = 0; j < num; j++)
-                //        {
-                //            showString = resultString.Substring(j * EPCLength + 2, EPCNumLength);
-                //            showString = EPC2VIN(showString);                       //将读取到的EPC号转换为VIN码
-
-                //            outPut("显示数据：" + Thread.CurrentThread.Name.ToString() + "   读写器ID：" + readerID + "   " + date + "   " + time + "   " + showString);
-                //        }
-                //    }
-                //}
-                //Thread.Sleep(1000);
             }
         }
 
@@ -342,7 +334,6 @@ namespace Controller
             byte[] parameter = new byte[8];
             long result = 0;
             result = StaticClassReaderB.GetWorkModeParameter(ref fComAdr, parameter, frmcomportindex);
-            outPut(Thread.CurrentThread.Name + "的状态：" + result);
 
             if (result != 0)
             {
@@ -369,7 +360,6 @@ namespace Controller
             string temps = "";
 
             fCmdRet = StaticClassReaderB.ReadActiveModeData(data, ref dataLength, frmcomportindex);
-            //outPut(Thread.CurrentThread.Name + "  fCmdRet：" + fCmdRet);
 
             int count = dataLength / 24;
             for (int i = 0; i < count; i++)
@@ -378,25 +368,6 @@ namespace Controller
                 Array.Copy(data, 7, daw, 0, 19);                //从data第7个字节开始复制到daw，复制19字节
                 temps = ByteArrayToHexString(daw);              //6-5.字节转为十六进制
             }
-
-            ////返回0值表示读取成功
-            //if (48 == fCmdRet)
-            //{
-            //    outPut("读取成功");
-            //    int count = dataLength / 24;
-            //    for (int i = 0; i < count; i++)
-            //    {
-            //        byte[] daw = new byte[19];
-            //        Array.Copy(data, 7, daw, 0, 19);     //从data第7个字节开始复制到daw，复制19字节
-            //        temps = ByteArrayToHexString(daw);
-            //    }
-            //}
-            ////返回非0值表示读取不成功
-            //else
-            //{
-            //    outPut("读取不成功");
-            //    temps = OFFLINE;
-            //}
 
             return temps;
         }
@@ -431,7 +402,124 @@ namespace Controller
             return result.ToUpper();
         }
 
-        
+        //6-6.判断是否在缓存队列中
+        public bool isInQueue(Vehicle vehicle)
+        {
+            Queue<Vehicle> queue = MyThreadLocal.get();
+
+            //检测站相同、VIN码相同、日期相同、时间小于durationMin，则认为是同一辆车
+            outPut(queue.GetHashCode() + "  queue.Count = " + queue.Count);
+            foreach (Vehicle v in queue){
+                if (vehicle.station.Equals(v.station))
+                {
+                    if (vehicle.VIN.Equals(v.VIN))
+                    {
+                        if (vehicle.date.Equals(v.date))
+                        {
+                            DateTime newTime = Convert.ToDateTime(vehicle.date + " " + vehicle.time);
+                            DateTime oldTime = Convert.ToDateTime(v.date + " " + v.time);
+
+                            TimeSpan end = new TimeSpan(newTime.Ticks);
+                            TimeSpan begin = new TimeSpan(oldTime.Ticks);
+                            TimeSpan duration = end.Subtract(begin).Duration();
+
+                            double result = duration.TotalMinutes;
+                            outPut(queue.GetHashCode () + "  相差" + result + "分钟");
+
+                            if (result < durationMin)
+                            {
+                                outPut(Thread.CurrentThread.Name + "  " + vehicle.station + "  同一辆车：" + vehicle.VIN);
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            //否则，认为不是同一辆车
+            if (queue.Count < cacheNum)
+            {
+                queue.Enqueue(vehicle);
+            }
+            else
+            {
+                if(queue.Count > 0)
+                {
+                    Vehicle v = queue.Dequeue();
+                    queue.Enqueue(vehicle);
+                }
+            }
+
+            outPut(queue.GetHashCode() + "  不是同一辆车：" + vehicle.VIN);
+            return false;
+        }
+
+        //6-7.写入数据库
+        public void manageDatabase(Vehicle vehicle)
+        {
+            OracleConnection oracle = getOracleCon();            //6-8.连接数据库
+            try
+            {
+                oracle.Open();
+            }
+            catch(Exception e)
+            {
+                outPut("打开数据库异常：" + e.Message);
+            }
+
+            string VIN = vehicle.getVIN();
+            string date = vehicle.getDate();
+            string time = vehicle.getTime();
+            string location = vehicle.getStation();
+            string driverID = vehicle.getDriverID();
+            string gate = vehicle.getDate();
+
+           //插入
+           String sqlInsert = "insert into stationinfo" + " values ('" + VIN + "','" + date + "','" + time + "','" + location + "','" + driverID + "','" + gate + "')";
+
+            OracleCommand oracleCommand = new OracleCommand(sqlInsert, oracle);
+            getInsert(oracleCommand);
+
+            oracle.Close();
+        }
+
+        //6-8.连接数据库
+        public OracleConnection getOracleCon()
+        {
+            string oracleStr = "User Id=SYSTEM;Password=Car123456;Data Source=CAR";
+            OracleConnection oracle = new OracleConnection(oracleStr);
+            return oracle;
+        }
+
+        public void getInsert(OracleCommand oracleCommand)
+        {
+            try
+            {
+                oracleCommand.ExecuteNonQuery();
+            }
+            catch (Exception ex)
+            {
+                String message = ex.Message;
+                outPut("插入数据失败了！" + message);
+            }
+        }
+
+        //6-9.通过代理更新ListView内容
+        public delegate void updateUICallback(int index, string str);
+        public void updateUI(int index, string str)
+        {
+            if (this.listView1.InvokeRequired)
+            {
+                updateUICallback call = new updateUICallback(updateUI);
+                this.Invoke(call, new object[] { index, str });
+            }
+            else
+            {
+                this.listView1.Items[index].SubItems[5].Text = str;
+            }
+        }
+
+
         //向XML中添加读写器
         public void addReader(int ID, String IPAddress, String location, String gate, String status)
         {
@@ -476,8 +564,31 @@ namespace Controller
         //向控制台输出
         public void outPut(string message)
         {
-            Console.WriteLine(DateTime.Now.ToString("HH:mm:ss:ff ") + message);
+            Console.WriteLine(DateTime.Now.ToString("HH:mm:ss ") + message);
         }
+
+
+        /// <summary>
+        /// Queue<Vehicle>相当于一个缓存，每个读写器对应一个（每个线程对应一个）
+        /// 用于存储此读写器最近读取的cacheNum辆车的相关信息
+        /// ThreadLocal类是C#自定义的用于保存线程局部变量的类（每个线程保存一个局部变量）
+        /// </summary>
+        public class MyThreadLocal
+        {
+            static ThreadLocal<Queue<Vehicle>> threadLocal = new ThreadLocal<Queue<Vehicle>>();
+
+            public static Queue<Vehicle> get()
+            {
+                if (threadLocal.Value == null)
+                {
+                    Queue<Vehicle>  queue = new Queue<Vehicle>();
+                    threadLocal.Value = queue;
+                }
+                return threadLocal.Value;
+            }
+        }
+
+
+
     }
-    
 }
