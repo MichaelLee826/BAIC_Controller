@@ -21,6 +21,16 @@ namespace Controller
         }
 
         //构造函数
+        public Vehicle(string VIN, string date, string time, string station)
+        {
+            this.VIN = VIN;
+            this.date = date;
+            this.time = time;
+            this.station = station;
+        }
+
+
+        //构造函数
         public Vehicle(string VIN, string date, string time, string station, string driverID, string gate)
         {
             this.VIN = VIN;
@@ -29,6 +39,17 @@ namespace Controller
             this.station = station;
             this.driverID = driverID;
             this.gate = gate;
+        }
+
+        //部分参数的set方法
+        public void setVIN(string VIN)
+        {
+            this.VIN = VIN;
+        }
+
+        public void setDriverID(string driverID)
+        {
+            this.driverID = driverID;
         }
 
         //各参数的get方法

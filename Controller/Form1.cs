@@ -16,15 +16,22 @@ namespace Controller
 {
     public partial class Form1 : Form
     {
+        const int INSERT = 0;
+        const int DELETE = 1;
+        const int UPDATE = 2;
+        const int QUERY = 3;
+
         private long fCmdRet = 0;                                           //所有执行指令的返回值
         private int frmcomportindex1, frmcomportindex2, frmcomportindex3;
         private int EPCLength = 36;                                         //EPC长度
         private int EPCNumLength = 34;                                      //EPC号长度
-        private string[] IPAddrs;                                           //读写器IP地址
         private List<RFIDReader> readerList;                                //读写器列表
-        private int count;                                                  //读写器个数
+        private int readerCount;                                            //读写器个数
+        private string[] readerIPAddrs;                                     //读写器IP地址
+        private string[] readerStatus;                                      //读写器状态
         private int cacheNum = 5;                                           //每个读写器缓存的车辆数目
         private double durationMin = 5;                                     //判断重复读的时间间隔（以分钟为单位）
+        private string xmlPath = "C:\\Users\\Michael Lee\\Documents\\Visual Studio 2015\\Projects\\Controller\\Controller\\RFIDReader.xml";
 
         public Form1()
         {
@@ -52,14 +59,6 @@ namespace Controller
             getReaderSettings();        //4.获得读写器相关参数
             openNetPort();              //5.打开网口
             startDataReceiveThread();   //6.启动多个读数据线程
-
-
-
-            //启动接收数据线程
-            //int id = 0;
-            //dataReceiveThread = new Thread(new ParameterizedThreadStart(DataReceiveThread));
-            //dataReceiveThread.Name = "DataReceiveThread";
-            //dataReceiveThread.Start(id);
         }
 
         private void Form1_SizeChanged(object sender, EventArgs e)
@@ -137,7 +136,7 @@ namespace Controller
             XmlDocument doc = new XmlDocument();
             XmlReaderSettings settings = new XmlReaderSettings();
             settings.IgnoreComments = true;                         //忽略XML文件中的注释
-            XmlReader xmlreader = XmlReader.Create(@"C:\Users\Michael Lee\Documents\Visual Studio 2015\Projects\Controller\Controller\RFIDReader.xml", settings);
+            XmlReader xmlreader = XmlReader.Create(xmlPath, settings);
             doc.Load(xmlreader);
 
             XmlNode rootNode = doc.SelectSingleNode("ReaderSystem");
@@ -149,8 +148,9 @@ namespace Controller
                 //读写器数量
                 if (nodeName.Equals("count"))
                 {
-                    count = Convert.ToInt32(((XmlElement)node).InnerText);
-                    IPAddrs = new string[count];
+                    readerCount = Convert.ToInt32(((XmlElement)node).InnerText);
+                    readerIPAddrs = new string[readerCount];
+                    readerStatus = new string[readerCount];
                 }
 
                 //各读写器信息
@@ -194,10 +194,15 @@ namespace Controller
         //4.获得读写器相关参数
         public void getReaderSettings()
         {
-            for(int i = 0; i < count; i++)
+            //IP地址
+            for(int i = 0; i < readerCount; i++)
             {
-                IPAddrs[i] = readerList[i].IPAddress;
+                readerIPAddrs[i] = readerList[i].IPAddress;
             }
+
+            //端口号
+
+            //地址号
         }
 
         //5.打开网口
@@ -215,50 +220,61 @@ namespace Controller
             int openresult2 = 0;
             int openresult3 = 0;
 
-            openresult1 = StaticClassReaderB.OpenNetPort(port1, IPAddrs[0], ref fComAdr1, ref frmcomportindex1);
-            openresult2 = StaticClassReaderB.OpenNetPort(port2, IPAddrs[1], ref fComAdr2, ref frmcomportindex2);
-            openresult3 = StaticClassReaderB.OpenNetPort(port3, IPAddrs[2], ref fComAdr3, ref frmcomportindex3);
+            openresult1 = StaticClassReaderB.OpenNetPort(port1, readerIPAddrs[0], ref fComAdr1, ref frmcomportindex1);
+            openresult2 = StaticClassReaderB.OpenNetPort(port2, readerIPAddrs[1], ref fComAdr2, ref frmcomportindex2);
+            openresult3 = StaticClassReaderB.OpenNetPort(port3, readerIPAddrs[2], ref fComAdr3, ref frmcomportindex3);
 
             if (openresult1 == 0)
             {
                 //MessageBox.Show("读写器一 网口打开成功", "信息");
-                updateUI(0, "在线");                              //6-9.通过代理更新ListView内容
+                readerStatus[0] = "在线";
+                updateUI(0, readerStatus[0]);                 //6-12.通过代理更新ListView内容
             }
             if (openresult2 == 0)
             {
                 //MessageBox.Show("读写器二 网口打开成功", "信息");
-                updateUI(1, "在线");
+                readerStatus[1] = "在线";
+                updateUI(1, readerStatus[1]);
             }
             if (openresult3 == 0)
             {
-               // MessageBox.Show("读写器三 网口打开成功", "信息");
-                updateUI(2, "在线");
+                // MessageBox.Show("读写器三 网口打开成功", "信息");
+                readerStatus[2] = "在线";
+                updateUI(2, readerStatus[2]);
             }
 
             if ((frmcomportindex1 == -1) || (openresult1 == 0x35) || (openresult1 == 0x30))
             {
                 //MessageBox.Show("读写器一 TCPIP通讯错误", "信息");
-                updateUI(0, "通讯错误");
+                readerStatus[0] = "通讯错误";
+                updateUI(0, readerStatus[0]);
             }
 
             if ((frmcomportindex2 == -1) || (openresult2 == 0x35) || (openresult2 == 0x30))
             {
                 //MessageBox.Show("读写器二 TCPIP通讯错误", "信息");
-                updateUI(1, "通讯错误");
+                readerStatus[1] = "通讯错误";
+                updateUI(1, readerStatus[1]);
             }
 
             if ((frmcomportindex3 == -1) || (openresult3 == 0x35) || (openresult3 == 0x30))
             {
                 //MessageBox.Show("读写器三 TCPIP通讯错误", "信息");
-                updateUI(2, "通讯错误");
+                readerStatus[2] = "通讯错误";
+                updateUI(2, readerStatus[2]);
             }
         }
 
         //6.启动多个读数据线程
         public void startDataReceiveThread()
         {
-            for (int i = 0; i < count; i++)
+            for (int i = 0; i < readerCount; i++)
             {
+                if (readerStatus[i].Equals("通讯错误"))
+                {
+                    break;
+                }
+
                 //读取数据线程
                 Thread dataReceiveThread = new Thread(new ParameterizedThreadStart(DataReceiveThread));
                 dataReceiveThread.Name = "DataReceiveThread--" + i;
@@ -295,7 +311,7 @@ namespace Controller
                 if (isOffLine)
                 {
                     outPut(readerID + "离线了");
-                    updateUI(index, "离线");                                    //6-9.通过代理更新ListView内容
+                    updateUI(index, "离线");                                    //6-12.通过代理更新ListView内容
                     StaticClassReaderB.CloseNetPort(frmindex);
                     Thread.CurrentThread.Abort();
                     break;
@@ -314,14 +330,17 @@ namespace Controller
                         showString = resultString.Substring(j * EPCLength + 2, EPCNumLength);
                         showString = EPC2VIN(showString);                       //6-4.将读取到的EPC号转换为VIN码
 
-                        Vehicle vehicle = new Vehicle(showString, date, time, "Station" + index, "DriverID", "Gate");
+                        Vehicle vehicle = new Vehicle(showString, date, time, readerList[readerID].location, "DriverID", readerList[readerID].gate);
 
                         if (isInQueue(vehicle))                                 //6-6.判断是否在缓存队列中，如果在，则不写入数据库
                         {
                             break;
                         }
 
-                        manageDatabase(vehicle);                                //6-7.写入数据库
+                        string[] driverInfo = queryDriverInfo(showString);      //6-8.通过VIN码查询驾驶员信息    
+                        vehicle.setDriverID(driverInfo[1]);
+
+                        manageDatabase(vehicle);                                //6-9.将过点信息写入数据库
                         outPut("显示数据：" + Thread.CurrentThread.Name.ToString() + "   读写器ID：" + readerID + "   " + date + "   " + time + "   " + showString);
                     }
                 }
@@ -408,7 +427,6 @@ namespace Controller
             Queue<Vehicle> queue = MyThreadLocal.get();
 
             //检测站相同、VIN码相同、日期相同、时间小于durationMin，则认为是同一辆车
-            outPut(queue.GetHashCode() + "  queue.Count = " + queue.Count);
             foreach (Vehicle v in queue){
                 if (vehicle.station.Equals(v.station))
                 {
@@ -424,11 +442,10 @@ namespace Controller
                             TimeSpan duration = end.Subtract(begin).Duration();
 
                             double result = duration.TotalMinutes;
-                            outPut(queue.GetHashCode () + "  相差" + result + "分钟");
 
                             if (result < durationMin)
                             {
-                                outPut(Thread.CurrentThread.Name + "  " + vehicle.station + "  同一辆车：" + vehicle.VIN);
+                                //outPut(Thread.CurrentThread.Name + "  " + vehicle.station + "  同一辆车：" + vehicle.VIN);
                                 return true;
                             }
                         }
@@ -450,14 +467,45 @@ namespace Controller
                 }
             }
 
-            outPut(queue.GetHashCode() + "  不是同一辆车：" + vehicle.VIN);
+            //outPut(queue.GetHashCode() + "  不是同一辆车：" + vehicle.VIN);
             return false;
         }
 
-        //6-7.写入数据库
+        //6-7.连接数据库
+        public OracleConnection getOracleCon()
+        {
+            string oracleStr = "User Id=SYSTEM;Password=Car123456;Data Source=CAR";
+            OracleConnection oracle = new OracleConnection(oracleStr);
+            return oracle;
+        }
+
+        //6-8.通过VIN码查询驾驶员信息
+        public string[] queryDriverInfo(string VIN)
+        {
+            OracleConnection oracle = getOracleCon();            //6-7.连接数据库
+            try
+            {
+                oracle.Open();
+            }
+            catch (Exception e)
+            {
+                outPut("打开数据库异常：" + e.Message);
+            }
+
+            //查询
+            string sqlQuery = "select NAME, ID from DEVICEINFO where VIN = " + "'" + VIN + "'";
+            OracleCommand oracleCommand = new OracleCommand(sqlQuery, oracle);
+            string[] result = getQuery(oracleCommand);          //6-10.数据库查询操作
+
+            oracle.Close();
+
+            return result;
+        }
+
+        //6-9.将过点信息写入数据库
         public void manageDatabase(Vehicle vehicle)
         {
-            OracleConnection oracle = getOracleCon();            //6-8.连接数据库
+            OracleConnection oracle = getOracleCon();            //6-7.连接数据库
             try
             {
                 oracle.Open();
@@ -472,25 +520,46 @@ namespace Controller
             string time = vehicle.getTime();
             string location = vehicle.getStation();
             string driverID = vehicle.getDriverID();
-            string gate = vehicle.getDate();
+            string gate = vehicle.getGate();
 
-           //插入
-           String sqlInsert = "insert into stationinfo" + " values ('" + VIN + "','" + date + "','" + time + "','" + location + "','" + driverID + "','" + gate + "')";
-
+            //插入
+            string sqlInsert = "insert into STATIONINFO" + " values ('" + VIN + "','" + date + "','" + time + "','" + location + "','" + driverID + "','" + gate + "')";
             OracleCommand oracleCommand = new OracleCommand(sqlInsert, oracle);
-            getInsert(oracleCommand);
+            getInsert(oracleCommand);                           //6-11.数据库插入操作
 
             oracle.Close();
         }
 
-        //6-8.连接数据库
-        public OracleConnection getOracleCon()
+        //6-10.数据库查询操作
+        public string[] getQuery(OracleCommand oracleCommand)
         {
-            string oracleStr = "User Id=SYSTEM;Password=Car123456;Data Source=CAR";
-            OracleConnection oracle = new OracleConnection(oracleStr);
-            return oracle;
+            OracleDataReader reader = oracleCommand.ExecuteReader();
+            string[] result = new string[2];
+
+            try
+            {
+                while (reader.Read())
+                {
+                    if (reader.HasRows)
+                    {
+                        result[0] = reader.GetString(0);            //NAME
+                        result[1] = reader.GetString(1);            //ID
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("查询失败了！");
+            }
+            finally
+            {
+                reader.Close();
+            }
+
+            return result;
         }
 
+        //6-11.数据库插入操作
         public void getInsert(OracleCommand oracleCommand)
         {
             try
@@ -504,7 +573,7 @@ namespace Controller
             }
         }
 
-        //6-9.通过代理更新ListView内容
+        //6-12.通过代理更新ListView内容
         public delegate void updateUICallback(int index, string str);
         public void updateUI(int index, string str)
         {
@@ -524,7 +593,7 @@ namespace Controller
         public void addReader(int ID, String IPAddress, String location, String gate, String status)
         {
             XmlDocument doc = new XmlDocument();
-            doc.Load(@"C:\Users\Michael Lee\Documents\Visual Studio 2015\Projects\Controller\Controller\RFIDReader.xml");
+            doc.Load(xmlPath);
 
             XmlNode rootNode = doc.SelectSingleNode("ReaderSystem");
             XmlElement node = doc.CreateElement("RFIDReader");
@@ -554,11 +623,11 @@ namespace Controller
             rootNode.AppendChild(node);
 
             //修改读写器数量
-            count = count + 1;
+            readerCount = readerCount + 1;
             XmlNode countNode = rootNode.SelectSingleNode("count");
-            ((XmlElement)countNode).InnerText = count + "";
+            ((XmlElement)countNode).InnerText = readerCount + "";
 
-            doc.Save(@"C:\Users\Michael Lee\Documents\Visual Studio 2015\Projects\Controller\Controller\RFIDReader.xml");
+            doc.Save(xmlPath);
         }
 
         //向控制台输出
