@@ -4,6 +4,8 @@
   <RFIDReader>
     <ID>1</ID>
     <IPAddress>192.168.1.190</IPAddress>
+	<port>6000</port>
+	<fComAdr>00</fComAdr>
     <location>上线</location>
     <gate>入口</gate>
     <status>待上线</status>
@@ -11,6 +13,8 @@
   <RFIDReader>
     <ID>2</ID>
     <IPAddress>192.168.1.191</IPAddress>
+	<port>7000</port>
+	<fComAdr>01</fComAdr>
     <location>上线</location>
     <gate>出口</gate>
     <status>待上线</status>
@@ -18,6 +22,8 @@
   <RFIDReader>
     <ID>3</ID>
     <IPAddress>192.168.1.192</IPAddress>
+	<port>8000</port>
+	<fComAdr>02</fComAdr>
     <location>目检1</location>
     <gate>入口</gate>
     <status>待上线</status>

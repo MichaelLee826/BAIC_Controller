@@ -11,54 +11,82 @@ using System.Windows.Forms;
 using System.Xml;
 using ReaderB;
 using Oracle.DataAccess.Client;
+using System.Diagnostics;
 
 namespace Controller
 {
     public partial class Form1 : Form
     {
-        const int INSERT = 0;
-        const int DELETE = 1;
-        const int UPDATE = 2;
-        const int QUERY = 3;
-
         private long fCmdRet = 0;                                           //所有执行指令的返回值
-        private int frmcomportindex1, frmcomportindex2, frmcomportindex3;
         private int EPCLength = 36;                                         //EPC长度
         private int EPCNumLength = 34;                                      //EPC号长度
         private List<RFIDReader> readerList;                                //读写器列表
         private int readerCount;                                            //读写器个数
+        private int[] readerFrmComPortIndexes;
         private string[] readerIPAddrs;                                     //读写器IP地址
-        private string[] readerStatus;                                      //读写器状态
+        private int[] readerPorts;                                          //读写器端口号
+        private byte[] readerFComAdrs;                                      //读写器地址
+        private int[] openResults;                                          //读写器网口打开结果
+        private string[] readerStatuses;                                    //读写器状态
         private int cacheNum = 5;                                           //每个读写器缓存的车辆数目
         private double durationMin = 5;                                     //判断重复读的时间间隔（以分钟为单位）
         private string xmlPath = "C:\\Users\\Michael Lee\\Documents\\Visual Studio 2015\\Projects\\Controller\\Controller\\RFIDReader.xml";
+        Splash splash = new Splash();
 
         public Form1()
         {
             InitializeComponent();
-
             this.StartPosition = FormStartPosition.CenterScreen;
-
-            readerList = new List<RFIDReader>(3);
         }
 
         private void Form1_Load(object sender, EventArgs e)
         {
+            string moduleName = Process.GetCurrentProcess().MainModule.ModuleName;
+            string processName = System.IO.Path.GetFileNameWithoutExtension(moduleName);
+            Process[] processes = Process.GetProcessesByName(processName);
+            if(processes.Length > 1)
+            {
+                MessageBox.Show("程序已在运行！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                this.Close();
+            }
+
             this.Top = 0;
             this.Left = 0;
             this.Width = Screen.PrimaryScreen.WorkingArea.Width;
             this.Height = Screen.PrimaryScreen.WorkingArea.Height;
-            //this.Size = Screen.PrimaryScreen.WorkingArea.Size;
             this.MaximumSize = new Size(Screen.PrimaryScreen.WorkingArea.Width, Screen.PrimaryScreen.WorkingArea.Height);
-            //MessageBox.Show(width + "*" + height);    //1440*860
 
+            getSystemTime();                //1.在状态栏显示系统时间
+            initReaders();                  //2.从XML文件中读取读写器基本信息
+            displayReaders();               //3.将信息显示在列表中
+            getReaderSettings();            //4.获得读写器相关参数
 
-            getSystemTime();            //1.在状态栏显示系统时间
-            initReaders();              //2.从XML文件中读取读写器基本信息
-            displayReaders();           //3.将信息显示在列表中
-            getReaderSettings();        //4.获得读写器相关参数
-            openNetPort();              //5.打开网口
-            startDataReceiveThread();   //6.启动多个读数据线程
+            //通过BackGroundWorker显示初始化界面（会调用backgroundWorker1_DoWork函数）
+            backgroundWorker1.RunWorkerAsync();
+            splash.ShowDialog();    
+        }
+
+        private void backgroundWorker1_DoWork(object sender, DoWorkEventArgs e)
+        {
+            openNetPort();                  //5.打开网口
+        }
+
+        private void backgroundWorker1_ProgressChanged(object sender, ProgressChangedEventArgs e)
+        {
+            //更新进度条
+            int percent = (int)((e.ProgressPercentage + 1.0) / readerCount * 100);
+            ProgressBar myProgressBar = splash.getProgressBar();
+            myProgressBar.Value = percent;
+
+            //更新Label
+            splash.updateLabel(e.ProgressPercentage + 1, readerCount);
+        }
+
+        private void backgroundWorker1_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
+        {
+            splash.Close();
+            updateListView();               //6.更新ListView
+            startDataReceiveThread();       //7.启动多个读数据线程
         }
 
         private void Form1_SizeChanged(object sender, EventArgs e)
@@ -149,8 +177,13 @@ namespace Controller
                 if (nodeName.Equals("count"))
                 {
                     readerCount = Convert.ToInt32(((XmlElement)node).InnerText);
+                    readerList = new List<RFIDReader>(readerCount);
                     readerIPAddrs = new string[readerCount];
-                    readerStatus = new string[readerCount];
+                    readerPorts = new int[readerCount];
+                    readerFComAdrs = new byte[readerCount];
+                    readerStatuses = new string[readerCount];
+                    readerFrmComPortIndexes = new int[readerCount];
+                    openResults = new int[readerCount];
                 }
 
                 //各读写器信息
@@ -164,9 +197,11 @@ namespace Controller
                     XmlNodeList list = element.ChildNodes;
                     reader.ID = Convert.ToInt32(list.Item(0).InnerText);
                     reader.IPAddress = list.Item(1).InnerText;
-                    reader.location = list.Item(2).InnerText;
-                    reader.gate = list.Item(3).InnerText;
-                    reader.status = list.Item(4).InnerText;
+                    reader.port = Convert.ToInt32(list.Item(2).InnerText);
+                    reader.fComAdr = Convert.ToByte(list.Item(3).InnerText);
+                    reader.location = list.Item(4).InnerText;
+                    reader.gate = list.Item(5).InnerText;
+                    reader.status = list.Item(6).InnerText;
 
                     readerList.Add(reader);
                 }
@@ -198,6 +233,8 @@ namespace Controller
             for(int i = 0; i < readerCount; i++)
             {
                 readerIPAddrs[i] = readerList[i].IPAddress;
+                readerPorts[i] = readerList[i].port;
+                readerFComAdrs[i] = readerList[i].fComAdr;
             }
 
             //端口号
@@ -208,69 +245,39 @@ namespace Controller
         //5.打开网口
         private void openNetPort()
         {
-            int port1 = 6000;
-            int port2 = 7000;
-            int port3 = 8000;
-
-            byte fComAdr1 = 0x00;
-            byte fComAdr2 = 0x01;
-            byte fComAdr3 = 0x02;
-
-            int openresult1 = 0;
-            int openresult2 = 0;
-            int openresult3 = 0;
-
-            openresult1 = StaticClassReaderB.OpenNetPort(port1, readerIPAddrs[0], ref fComAdr1, ref frmcomportindex1);
-            openresult2 = StaticClassReaderB.OpenNetPort(port2, readerIPAddrs[1], ref fComAdr2, ref frmcomportindex2);
-            openresult3 = StaticClassReaderB.OpenNetPort(port3, readerIPAddrs[2], ref fComAdr3, ref frmcomportindex3);
-
-            if (openresult1 == 0)
+            for(int i = 0; i < readerCount; i++)
             {
-                //MessageBox.Show("读写器一 网口打开成功", "信息");
-                readerStatus[0] = "在线";
-                updateUI(0, readerStatus[0]);                 //6-12.通过代理更新ListView内容
-            }
-            if (openresult2 == 0)
-            {
-                //MessageBox.Show("读写器二 网口打开成功", "信息");
-                readerStatus[1] = "在线";
-                updateUI(1, readerStatus[1]);
-            }
-            if (openresult3 == 0)
-            {
-                // MessageBox.Show("读写器三 网口打开成功", "信息");
-                readerStatus[2] = "在线";
-                updateUI(2, readerStatus[2]);
-            }
-
-            if ((frmcomportindex1 == -1) || (openresult1 == 0x35) || (openresult1 == 0x30))
-            {
-                //MessageBox.Show("读写器一 TCPIP通讯错误", "信息");
-                readerStatus[0] = "通讯错误";
-                updateUI(0, readerStatus[0]);
-            }
-
-            if ((frmcomportindex2 == -1) || (openresult2 == 0x35) || (openresult2 == 0x30))
-            {
-                //MessageBox.Show("读写器二 TCPIP通讯错误", "信息");
-                readerStatus[1] = "通讯错误";
-                updateUI(1, readerStatus[1]);
-            }
-
-            if ((frmcomportindex3 == -1) || (openresult3 == 0x35) || (openresult3 == 0x30))
-            {
-                //MessageBox.Show("读写器三 TCPIP通讯错误", "信息");
-                readerStatus[2] = "通讯错误";
-                updateUI(2, readerStatus[2]);
+                backgroundWorker1.ReportProgress(i);            //更新进度条
+                openResults[i] = StaticClassReaderB.OpenNetPort(readerPorts[i], readerIPAddrs[i], ref readerFComAdrs[i], ref readerFrmComPortIndexes[i]);
             }
         }
 
-        //6.启动多个读数据线程
+        //6.更新ListView
+        public void updateListView()
+        {
+            for(int i = 0; i < readerCount; i++)
+            {
+                if(openResults[i] == 0)
+                {
+                    readerStatuses[i] = "在线";
+                    updateUI(i, readerStatuses[i]);                 //7-12.通过代理更新ListView内容
+                }
+
+                if((readerFrmComPortIndexes[i] == -1) || (openResults[i] == 0x35) || (openResults[i] == 0x30))
+                {
+                    readerStatuses[i] = "通讯错误";
+                    updateUI(i, readerStatuses[i]);
+                }
+            }
+        }
+
+
+        //7.启动多个读数据线程
         public void startDataReceiveThread()
         {
             for (int i = 0; i < readerCount; i++)
             {
-                if (readerStatus[i].Equals("通讯错误"))
+                if (readerStatuses[i].Equals("通讯错误"))
                 {
                     break;
                 }
@@ -282,7 +289,7 @@ namespace Controller
             }
         }
 
-        //6-1.读数据线程
+        //7-1.读数据线程
         public void DataReceiveThread(object obj)
         {
             byte readerID = Convert.ToByte(Convert.ToInt32(obj.ToString()));
@@ -295,29 +302,21 @@ namespace Controller
             string showString = "";
             bool isOffLine = false;
 
-            switch (index)
-            {
-                case 0: frmindex = frmcomportindex1;
-                        break;
-                case 1: frmindex = frmcomportindex2;
-                        break;
-                case 2: frmindex = frmcomportindex3;
-                        break;
-            }
+            frmindex = readerFrmComPortIndexes[index];
 
             while (true)
             {
-                isOffLine = getReaderStatus(readerID, frmindex, ref errCount);  //6-2.检查读写器是否离线
+                isOffLine = getReaderStatus(readerID, frmindex, ref errCount);  //7-2.检查读写器是否离线
                 if (isOffLine)
                 {
                     outPut(readerID + "离线了");
-                    updateUI(index, "离线");                                    //6-12.通过代理更新ListView内容
+                    updateUI(index, "离线");                                    //7-12.通过代理更新ListView内容
                     StaticClassReaderB.CloseNetPort(frmindex);
                     Thread.CurrentThread.Abort();
                     break;
                 }
 
-                resultString = getActiveModeData(readerID, frmindex);           //6-3.读取主动模式数据
+                resultString = getActiveModeData(readerID, frmindex);           //7-3.读取主动模式数据
 
                 date = DateTime.Today.ToString("yyyy-MM-dd");                   //获取当前日期
                 time = DateTime.Now.ToString("HH:mm:ss");                       //获取当前时间
@@ -328,11 +327,11 @@ namespace Controller
                     for (int j = 0; j < num; j++)
                     {
                         showString = resultString.Substring(j * EPCLength + 2, EPCNumLength);
-                        showString = EPC2VIN(showString);                       //6-4.将读取到的EPC号转换为VIN码
+                        showString = EPC2VIN(showString);                       //7-4.将读取到的EPC号转换为VIN码
 
                         Vehicle vehicle = new Vehicle(showString, date, time, readerList[readerID].location, "DriverID", readerList[readerID].gate);
 
-                        if (isInQueue(vehicle))                                 //6-6.判断是否在缓存队列中，如果在，则不写入数据库
+                        if (isInQueue(vehicle))                                 //7-6.判断是否在缓存队列中，如果在，则不写入数据库
                         {
                             break;
                         }
@@ -347,7 +346,7 @@ namespace Controller
             }
         }
 
-        //6-2.检查读写器是否离线
+        //7-2.检查读写器是否离线
         public bool getReaderStatus(byte fComAdr, int frmcomportindex, ref int errCount)
         {            
             byte[] parameter = new byte[8];
@@ -371,7 +370,7 @@ namespace Controller
             return false;
         }
 
-        //6-3.读取主动模式数据
+        //7-3.读取主动模式数据
         private string getActiveModeData(byte fComAdr, int frmcomportindex)
         {
             byte[] data = new byte[100];
@@ -385,13 +384,13 @@ namespace Controller
             {
                 byte[] daw = new byte[19];
                 Array.Copy(data, 7, daw, 0, 19);                //从data第7个字节开始复制到daw，复制19字节
-                temps = ByteArrayToHexString(daw);              //6-5.字节转为十六进制
+                temps = ByteArrayToHexString(daw);              //7-5.字节转为十六进制
             }
 
             return temps;
         }
 
-        //6-4.将读取到的EPC号转换为VIN码
+        //7-4.将读取到的EPC号转换为VIN码
         public string EPC2VIN(string EPCstr)
         {
             string VINstr = string.Empty;
@@ -409,7 +408,7 @@ namespace Controller
             return VINstr;
         }
 
-        //6-5.字节转为十六进制
+        //7-5.字节转为十六进制
         private string ByteArrayToHexString(byte[] data)
         {
             StringBuilder sb = new StringBuilder(data.Length * 3);
@@ -421,7 +420,7 @@ namespace Controller
             return result.ToUpper();
         }
 
-        //6-6.判断是否在缓存队列中
+        //7-6.判断是否在缓存队列中
         public bool isInQueue(Vehicle vehicle)
         {
             Queue<Vehicle> queue = MyThreadLocal.get();
@@ -445,7 +444,6 @@ namespace Controller
 
                             if (result < durationMin)
                             {
-                                //outPut(Thread.CurrentThread.Name + "  " + vehicle.station + "  同一辆车：" + vehicle.VIN);
                                 return true;
                             }
                         }
@@ -467,11 +465,10 @@ namespace Controller
                 }
             }
 
-            //outPut(queue.GetHashCode() + "  不是同一辆车：" + vehicle.VIN);
             return false;
         }
 
-        //6-7.连接数据库
+        //7-7.连接数据库
         public OracleConnection getOracleCon()
         {
             string oracleStr = "User Id=SYSTEM;Password=Car123456;Data Source=CAR";
@@ -479,10 +476,10 @@ namespace Controller
             return oracle;
         }
 
-        //6-8.通过VIN码查询驾驶员信息
+        //7-8.通过VIN码查询驾驶员信息
         public string[] queryDriverInfo(string VIN)
         {
-            OracleConnection oracle = getOracleCon();            //6-7.连接数据库
+            OracleConnection oracle = getOracleCon();            //7-7.连接数据库
             try
             {
                 oracle.Open();
@@ -495,17 +492,17 @@ namespace Controller
             //查询
             string sqlQuery = "select NAME, ID from DEVICEINFO where VIN = " + "'" + VIN + "'";
             OracleCommand oracleCommand = new OracleCommand(sqlQuery, oracle);
-            string[] result = getQuery(oracleCommand);          //6-10.数据库查询操作
+            string[] result = getQuery(oracleCommand);          //7-10.数据库查询操作
 
             oracle.Close();
 
             return result;
         }
 
-        //6-9.将过点信息写入数据库
+        //7-9.将过点信息写入数据库
         public void manageDatabase(Vehicle vehicle)
         {
-            OracleConnection oracle = getOracleCon();            //6-7.连接数据库
+            OracleConnection oracle = getOracleCon();            //7-7.连接数据库
             try
             {
                 oracle.Open();
@@ -525,12 +522,12 @@ namespace Controller
             //插入
             string sqlInsert = "insert into STATIONINFO" + " values ('" + VIN + "','" + date + "','" + time + "','" + location + "','" + driverID + "','" + gate + "')";
             OracleCommand oracleCommand = new OracleCommand(sqlInsert, oracle);
-            getInsert(oracleCommand);                           //6-11.数据库插入操作
+            getInsert(oracleCommand);                           //7-11.数据库插入操作
 
             oracle.Close();
         }
 
-        //6-10.数据库查询操作
+        //7-10.数据库查询操作
         public string[] getQuery(OracleCommand oracleCommand)
         {
             OracleDataReader reader = oracleCommand.ExecuteReader();
@@ -559,7 +556,7 @@ namespace Controller
             return result;
         }
 
-        //6-11.数据库插入操作
+        //7-11.数据库插入操作
         public void getInsert(OracleCommand oracleCommand)
         {
             try
@@ -573,7 +570,7 @@ namespace Controller
             }
         }
 
-        //6-12.通过代理更新ListView内容
+        //7-12.通过代理更新ListView内容
         public delegate void updateUICallback(int index, string str);
         public void updateUI(int index, string str)
         {
@@ -587,7 +584,6 @@ namespace Controller
                 this.listView1.Items[index].SubItems[5].Text = str;
             }
         }
-
 
         //向XML中添加读写器
         public void addReader(int ID, String IPAddress, String location, String gate, String status)
@@ -612,6 +608,9 @@ namespace Controller
             XmlElement locationElement = doc.CreateElement("location");
             locationElement.InnerText = location;
             node.AppendChild(locationElement);
+
+
+
             XmlElement gateElement = doc.CreateElement("gate");
             gateElement.InnerText = gate;
             node.AppendChild(gateElement);
@@ -633,7 +632,7 @@ namespace Controller
         //向控制台输出
         public void outPut(string message)
         {
-            Console.WriteLine(DateTime.Now.ToString("HH:mm:ss ") + message);
+            Console.WriteLine(DateTime.Now.ToString("HH:mm:ss:ff ") + message);
         }
 
 
@@ -656,8 +655,5 @@ namespace Controller
                 return threadLocal.Value;
             }
         }
-
-
-
     }
 }

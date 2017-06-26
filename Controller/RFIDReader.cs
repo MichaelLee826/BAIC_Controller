@@ -10,6 +10,9 @@ namespace Controller
     {
         public int ID;                      //读写器编号
         public String IPAddress;            //读写器IP地址
+        public int port;                    //读写器端口
+        public byte fComAdr;                //读写器地址
+        public int openResult;              //读写器网口打开结果
         public String location;             //读写器实际位置
         public String gate;                 //入口/出口
         public String status;               //读写器状态
@@ -21,10 +24,13 @@ namespace Controller
         }
 
         //构造函数
-        public RFIDReader(int ID, String IPAddress, String location, String gate, String status)
+        public RFIDReader(int ID, String IPAddress, int port, byte fComAdr, int openResult, String location, String gate, String status)
         {
             this.ID = ID;
             this.IPAddress = IPAddress;
+            this.port = port;
+            this.fComAdr = fComAdr;
+            this.openResult = openResult;
             this.location = location;
             this.gate = gate;
             this.status = status;
@@ -49,6 +55,36 @@ namespace Controller
         public String getIPAddress()
         {
             return this.IPAddress;
+        }
+
+        public void setPort(int port)
+        {
+            this.port = port;
+        }
+
+        public int getPort()
+        {
+            return this.port;
+        }
+
+        public void setFComAdr(byte fComAdr)
+        {
+            this.fComAdr = fComAdr;
+        }
+
+        public byte getFComAdr()
+        {
+            return this.fComAdr;
+        }
+
+        public void setOpenResult(int openResult)
+        {
+            this.openResult = openResult;
+        }
+
+        public int getOpenResult()
+        {
+            return this.openResult;
         }
 
         public void setLocation(String location)

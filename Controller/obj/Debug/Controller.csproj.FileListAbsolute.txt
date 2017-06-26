@@ -7,3 +7,4 @@ c:\users\michael lee\documents\visual studio 2015\Projects\Controller\Controller
 c:\users\michael lee\documents\visual studio 2015\Projects\Controller\Controller\obj\Debug\Controller.csproj.GenerateResource.Cache
 c:\users\michael lee\documents\visual studio 2015\Projects\Controller\Controller\obj\Debug\Controller.exe
 c:\users\michael lee\documents\visual studio 2015\Projects\Controller\Controller\obj\Debug\Controller.pdb
+C:\Users\Michael Lee\documents\visual studio 2015\Projects\Controller\Controller\obj\Debug\Controller.Splash.resources
